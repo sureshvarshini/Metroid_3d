@@ -1,0 +1,8 @@
+﻿  glad.c
+  Main.cpp
+  Shader.cpp
+  Generating code
+  Previous IPDB not found, fall back to full compilation.
+  All 52 functions were compiled because no usable IPDB/IOBJ from previous compilation was found.
+  Finished generating code
+  Metroid.vcxproj -> D:\Varshini\CourseWork\Computer Graphics\Individual_Project\Metroid\Release\Metroid.exe
