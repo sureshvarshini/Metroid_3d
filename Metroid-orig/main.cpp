@@ -18,7 +18,6 @@
 
 // Include GLFW
 #include <GLFW/glfw3.h>
-//#include<glad/glad.h>
 
 // Assimp includes
 #include <assimp/cimport.h> 
@@ -32,7 +31,7 @@
 #define INTERVAL 15
 
 //  Sun coordinated
-const char* sun_path = "sol.obj";
+const char* sun_path = "sun.obj";
 std::vector<vec3> sun_vertices;
 vec3 sun_position = vec3(15.0, 15.0, 15.0);
 GLuint sunPosID;
@@ -73,12 +72,7 @@ float deltaAngle = 0.0f;
 float deltaMove = 0;
 float yaw = -90.0f;
 float pitch = 0.0f;
-// angle of rotation for the camera direction
-float angle = 0.0;
-// actual vector representing the camera's direction
-float lx = 0.0f, lz = -1.0f;
-// XZ position of the camera
-float x = 0.0f, z = 5.0f;
+
 glm::vec3 position = glm::vec3(0.0f, 0.5f, 3.0f);
 glm::vec3 direction = glm::vec3(0.0f, 0.0f, -1.0f);
 glm::vec3 up = glm::vec3(0.0f, 1.0f, 0.0f);
@@ -92,16 +86,7 @@ GLfloat prev_mouse_Y;
 bool is_first_time = true;
 vec2 m_mousePos;
 
-// position
-glm::vec3 fposition = glm::vec3(0, 0, 5);
-// horizontal angle : toward -Z
-float fhorizontalAngle = 3.14f;
-// vertical angle : 0, look at the horizon
-float fverticalAngle = 0.0f;
-// Initial Field of View
-float finitialFoV = 45.0f;
-
-float fspeed = 3.0f; // 3 units / second
+float fspeed = 3.0f;
 float fmouseSpeed = 0.005f;
 
 glm::mat4 ViewMatrix = glm::mat4();
@@ -115,7 +100,6 @@ const char* pFSFileName = "simpleFragmentShader.txt";
 
 const char* sunVertexShader = "sunVertexShader.txt";
 const char* sunFragmentShader = "sunFragmentShader.txt";
-
 
 ModelData load_mesh(const char* file_name) {
 	ModelData modelData;
@@ -151,12 +135,7 @@ ModelData load_mesh(const char* file_name) {
 				const aiVector3D* vt = &(mesh->mTextureCoords[0][v_i]);
 				modelData.mTextureCoords.push_back(vec2(vt->x, vt->y));
 			}
-			if (mesh->HasTangentsAndBitangents()) {
-				/* You can extract tangents and bitangents here              */
-				/* Note that you might need to make Assimp generate this     */
-				/* data for you. Take a look at the flags that aiImportFile  */
-				/* can take.                                                 */
-			}
+			if (mesh->HasTangentsAndBitangents()) { }
 		}
 	}
 
@@ -176,11 +155,9 @@ bool loadOBJ(const char* path, std::vector<glm::vec3>& out_vertices) {
 	}
 	while (1) {
 		char lineHeader[128];
-		// read the first word of the line
 		int res = fscanf(file, "%s", lineHeader);
 		if (res == EOF)
-			break; // EOF = End Of File. Quit the loop.
-		// else : parse lineHeader
+			break;
 		if (strcmp(lineHeader, "v") == 0) {
 			glm::vec3 vertex;
 			fscanf(file, "%f %f %f\n", &vertex.x, &vertex.y, &vertex.z);
@@ -200,18 +177,13 @@ bool loadOBJ(const char* path, std::vector<glm::vec3>& out_vertices) {
 			vertexIndices.push_back(vertexIndex[2]);
 		}
 		else {
-			// Probably a comment, eat up the rest of the line
-			char stupidBuffer[1000];
-			fgets(stupidBuffer, 1000, file);
+			char tempBuffer[1000];
+			fgets(tempBuffer, 1000, file);
 		}
 	}
-	// For each vertex of each triangle
 	for (unsigned int i = 0; i < vertexIndices.size(); i++) {
-		// Get the indices of its attributes
 		unsigned int vertexIndex = vertexIndices[i];
-		// Get the attributes thanks to the index
 		glm::vec3 vertex = temp_vertices[vertexIndex - 1];
-		// Put the attributes in buffers
 		out_vertices.push_back(vertex);
 	}
 	fclose(file);
@@ -249,7 +221,6 @@ static void AddShader(GLuint ShaderProgram, const char* pShaderText, GLenum Shad
 
 	const char* pShaderSource = readShaderSource(pShaderText);
 
-	// To load shader text onto shader handle
 	glShaderSource(ShaderObj, 1, (const GLchar**)&pShaderSource, NULL);
 	glCompileShader(ShaderObj);
 
@@ -262,21 +233,17 @@ static void AddShader(GLuint ShaderProgram, const char* pShaderText, GLenum Shad
 		fprintf(stderr, "Error compiling shader type %d: '%s'\n", ShaderType, InfoLog);
 		exit(1);
 	}
-	// Attach the compiled shader object to the program object
 	glAttachShader(ShaderProgram, ShaderObj);
 }
 
 GLuint CompileShaders()
 {
-	// Allocate handle for our program
 	shaderProgramID = glCreateProgram();
-	// Check for non-zero handle as system may sometimes run out of resources
 	if (shaderProgramID == 0) {
 		fprintf(stderr, "Error creating shader program\n");
 		exit(1);
 	}
 
-	// Create two shader objects, one for the vertex, and one for the fragment shader
 	AddShader(shaderProgramID, pVSFileName, GL_VERTEX_SHADER);
 	AddShader(shaderProgramID, pFSFileName, GL_FRAGMENT_SHADER);
 
@@ -285,9 +252,7 @@ GLuint CompileShaders()
 
 	GLint Success = 0;
 	GLchar ErrorLog[1024] = { '\0' };
-	// After compiling all shader objects and attaching them to the program, we can finally link it
 	glLinkProgram(shaderProgramID);
-	// check for program related errors using glGetProgramiv
 	glGetProgramiv(shaderProgramID, GL_LINK_STATUS, &Success);
 	if (Success == 0) {
 		glGetProgramInfoLog(shaderProgramID, sizeof(ErrorLog), NULL, ErrorLog);
@@ -295,16 +260,13 @@ GLuint CompileShaders()
 		exit(1);
 	}
 
-	// program has been successfully linked but needs to be validated to check whether the program can execute given the current pipeline state
 	glValidateProgram(shaderProgramID);
-	// check for program related errors using glGetProgramiv
 	glGetProgramiv(shaderProgramID, GL_VALIDATE_STATUS, &Success);
 	if (!Success) {
 		glGetProgramInfoLog(shaderProgramID, sizeof(ErrorLog), NULL, ErrorLog);
 		fprintf(stderr, "Invalid shader program: '%s'\n", ErrorLog);
 		exit(1);
 	}
-	// Finally, use the linked shader program
 	glUseProgram(shaderProgramID);
 	return shaderProgramID;
 }
@@ -321,7 +283,6 @@ void generateObjectBufferMesh() {
 	glGenBuffers(1, &vertexbuffer);
 	glBindBuffer(GL_ARRAY_BUFFER, vertexbuffer);
 	glBufferData(GL_ARRAY_BUFFER, mesh_data.mPointCount * sizeof(vec3), &mesh_data.mVertices[0], GL_STATIC_DRAW);
-
 
 	glGenBuffers(1, &normalbuffer);
 	glBindBuffer(GL_ARRAY_BUFFER, normalbuffer);
@@ -345,7 +306,6 @@ void generateObjectBufferMesh() {
 	//	glEnableVertexAttribArray (loc3);
 	//	glBindBuffer (GL_ARRAY_BUFFER, texturebuffer);
 	//	glVertexAttribPointer (loc3, 2, GL_FLOAT, GL_FALSE, 0, NULL);
-
 
 	glEnableVertexAttribArray(loc4);
 	glVertexAttribPointer(loc4, 3, GL_FLOAT, GL_FALSE, 0, NULL);
@@ -380,18 +340,17 @@ void change_viewport(int w, int h) {
 	aspect = GLfloat(width) / height;
 	glViewport(0, 0, width, height);
 	glMatrixMode(GL_PROJECTION);
-	glLoadIdentity(); 
+	glLoadIdentity();
 }
 
 void RenderScreen() {
 
 	// Dark background
-	glClearColor(0.f, 0.0f, 0.4f, 1.0f);
+	glClearColor(0.0f, 0.0f, 0.1f, 0.0f);
 
-	// tell GL to only draw onto a pixel if the shape is closer to the viewer
-	glEnable(GL_DEPTH_TEST); // enable depth-testing
+	glEnable(GL_DEPTH_TEST);
 	glEnable(GL_CULL_FACE);
-	glDepthFunc(GL_LESS); // depth-testing interprets a smaller value as "closer"
+	glDepthFunc(GL_LESS);
 	glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
 	glPolygonMode(GL_FRONT_AND_BACK, GL_FILL);
 	glUseProgram(shaderProgramID);
@@ -408,25 +367,20 @@ void RenderScreen() {
 	GLuint scrID = glGetUniformLocation(shaderProgramID, "scr_center");
 	vec2 scr_center = vec2(width / 2, height / 2);
 	sunPosID = glGetUniformLocation(shaderProgramID, "lightPos");
+
 	GLfloat cameraPosition[] = { position.x, position.y, position.z };
 	glUniform3fv(cameraPosID, 1, &cameraPosition[0]);
 	glUniform2fv(scrID, 1, &scr_center.v[0]);
 
-
-	//Declare your uniform variables that will be used in your shader
 	int matrix_location = glGetUniformLocation(shaderProgramID, "model");
 	int view_mat_location = glGetUniformLocation(shaderProgramID, "view");
 	int proj_mat_location = glGetUniformLocation(shaderProgramID, "projection");
 	int MVP_location = glGetUniformLocation(shaderProgramID, "MVP");
 
-	// Compute the MVP matrix from keyboard and mouse input
 	glm::mat4 View = ViewMatrix;
 	glm::mat4 Projection = ProjectionMatrix;
 	glm::mat4 Model;
-	//Model = rotate_z_deg(Model, rotate_y);
-	//View = translate(View, vec3(0.0, 0.0, -10.0f));
 	glm::mat4 MVP = Projection * View * Model;
-
 
 	Model = glm::rotate(View, 180.0f, glm::vec3(0, 1, 0));
 	View = glm::translate(View, glm::vec3(0.0, 0.0, -20.0f));
@@ -487,17 +441,13 @@ void updateScene() {
 	if (rotate_y >= 0) {
 		rotate_y += 8.0f * delta;
 		rotate_y = fmodf(rotate_y, 360.0f);
-		//printf("%f\n", rotate_y);
 
 		//Reset if it reaches the end of window
 		if (rotate_y >= 20.0f) {
 			rotate_y = 0.0f;
-			//printf("decreasing\n");
-			//printf("%f\n", rotate_y);
 		}
 	}
 
-	// Draw the next frame
 	glutPostRedisplay();
 }
 
@@ -521,7 +471,6 @@ void init() {
 void pressKey(int key, int xx, int yy) {
 	float fraction = 0.5f;
 
-
 	switch (key) {
 	case GLUT_KEY_LEFT:
 		position -= glm::normalize(glm::cross(direction, up)) * fraction;
@@ -532,30 +481,28 @@ void pressKey(int key, int xx, int yy) {
 		break;
 
 	case GLUT_KEY_UP:
-		// x += lx * fraction;
 		position += fraction * direction;
 		break;
 
 	case GLUT_KEY_DOWN:
-		// x -= x * fraction;
 		position -= fraction * direction;
 		break;
 	}
-	
-	
+
+
 	ProjectionMatrix = glm::perspective(45.0f, aspect, 0.1f, 1000.0f);
 
 	ViewMatrix = glm::lookAt(
 		position,           // Camera is here
 		position + direction, // and looks here : at the same position, plus "direction"
-		up                  // Head is up (set to 0,-1,0 to look upside-down)
+		up                  // Head is up
 	);
 	glutPostRedisplay();
 }
 
 void callback_mouse_button(int button, int state, int x, int y) {
 	printf("%d, %d\n", button, state);
-	
+
 	if (button == GLUT_LEFT_BUTTON) {
 		if (state == 0) {
 			zooming = true;
@@ -567,23 +514,17 @@ void callback_mouse_button(int button, int state, int x, int y) {
 }
 
 void zoom_in() {
-	// FOV == field of view of the camera
-	// zooming is set by the callback_mouse_button()
 	fov -= 10.0f;
-	if (fov < 5.0f) fov = 5.0f; // don't allow fov less than 5
+	if (fov < 5.0f) fov = 5.0f;
 	ProjectionMatrix = glm::perspective(fov, aspect, 1.0f, 1000.0f);
 }
 
 void zoom_out() {
-	// FOV == field of view of the camera
-	// zooming is set by the callback_mouse_button()
 	fov += 10.0f;
-	if (fov > 60.0f) fov = 60.0f; // don't allow fov less than 5
+	if (fov > 60.0f) fov = 60.0f;
 	ProjectionMatrix = glm::perspective(fov, aspect, 1.0f, 1000.0f);
 }
 
-// Compare the current mouse position with the old one to figure out which way to rotate the camera.
-// We call these "deltas" or "differences" in x and y
 void look(int x, int y) {
 	float sens = 0.1f;
 	if (is_first_time) {
@@ -606,18 +547,18 @@ void look(int x, int y) {
 		deltaX /= 10.0f;
 		deltaY /= 10.0f;
 	}
-	
+
 	glm::vec3 cam;
 	cam.x = cos(glm::radians(yaw)) * cos(glm::radians(pitch));
 	cam.y = sin(glm::radians(pitch));
 	cam.z = sin(glm::radians(yaw)) * cos(glm::radians(pitch));
 	direction = glm::normalize(cam);
 
-	printf("Delta %d %d %d\n", direction[0], direction[1], direction[2]);
+	printf("Delta %f %f %f\n", direction[0], direction[1], direction[2]);
 	ViewMatrix = glm::lookAt(
-		position,           
-		direction, 
-		up                  
+		position,
+		direction,
+		up
 	);
 
 }
@@ -649,18 +590,18 @@ int main(int argc, char** argv) {
 	glutDisplayFunc(RenderScreen);
 	glutIdleFunc(updateScene);
 
-	// Keyboard movements
+	//5. Keyboard movements
 	glutSpecialFunc(pressKey);
 
-	// Mouse movements
+	//6. Mouse movements
 	glutMouseFunc(callback_mouse_button);
 	glutPassiveMotionFunc(look);
 	// glutMotionFunc(look);
 
-	//5. Set up objects and shaders
+	//7. Set up objects and shaders
 	init();
 
-	//6. Begin infinite event loop
+	//8. Begin infinite event loop
 	glutMainLoop();
 
 	return 0;
