@@ -11,6 +11,10 @@ out vec3 Normal_cameraspace;
 out vec3 EyeDirection_cameraspace;
 out vec3 LightDirection_cameraspace;
 
+out vec2 uv_vertex;
+out vec3 surfaceNormals;
+out vec3 fragmentPosition;
+
 out vec3 LightIntensity;
 out vec3 fragmentColor;
 
@@ -50,7 +54,10 @@ void main(){
   LightIntensity = Ld * Kd * max( dot( s, tnorm ), 0.0 );
   
   gl_Position = projection * view * model * vec4(vertex_position,1.0);
+
+  uv_vertex = vertex_uv;
+
+  surfaceNormals = vertex_normal;
+
+  fragmentPosition = vertex_position;
 }
-
-
-  

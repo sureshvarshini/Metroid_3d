@@ -1,3 +1,6 @@
+#ifdef _MSC_VER
+#define _CRT_SECURE_NO_WARNINGS
+#endif
 #include <windows.h>
 #include <mmsystem.h>
 #include <iostream>
@@ -9,6 +12,9 @@
 // OpenGL includes
 #include <GL/glew.h>
 #include <GL/freeglut.h>
+#include<glm/gtc/matrix_transform.hpp>
+#include <glm/glm.hpp>
+#include <glm/gtc/type_ptr.hpp>
 
 // Include GLFW
 #include <GLFW/glfw3.h>
@@ -24,6 +30,19 @@
 
 #define MESH_NAME "spider.dae"
 #define INTERVAL 15
+
+//  Sun coordinated
+const char* sun_path = "sol.obj";
+std::vector<vec3> sun_vertices;
+vec3 sun_position = vec3(15.0, 15.0, 15.0);
+GLuint sunPosID;
+vec3 sunPosition;
+GLuint sunDistance;
+GLuint sun_VertexArrayID;
+GLuint sun_vertexbuffer_size;
+GLuint sun_vertexbuffer;
+GLuint ModelSunID;
+GLuint sunShaderID;
 
 typedef struct a
 {
@@ -58,6 +77,9 @@ float angle = 0.0;
 float lx = 0.0f, lz = -1.0f;
 // XZ position of the camera
 float x = 0.0f, z = 5.0f;
+glm::vec3 position = glm::vec3(0.0f, 0.5f, 3.0f);
+glm::vec3 direction = glm::vec3(0.0f, 0.0f, -1.0f);
+glm::vec3 up = glm::vec3(0.0f, 1.0f, 0.0f);
 GLboolean zooming;
 GLfloat fov;
 GLfloat aspect = 1.0f;
@@ -69,7 +91,7 @@ bool is_first_time = true;
 vec2 m_mousePos;
 
 // position
-vec3 fposition = vec3(0, 0, 5);
+glm::vec3 fposition = glm::vec3(0, 0, 5);
 // horizontal angle : toward -Z
 float fhorizontalAngle = 3.14f;
 // vertical angle : 0, look at the horizon
@@ -80,14 +102,18 @@ float finitialFoV = 45.0f;
 float fspeed = 3.0f; // 3 units / second
 float fmouseSpeed = 0.005f;
 
-mat4 ViewMatrix = identity_mat4();
-mat4 ProjectionMatrix = perspective(fov, aspect, 0.1f, 1000.0f);
+glm::mat4 ViewMatrix = glm::mat4();
+glm::mat4 ProjectionMatrix = glm::perspective(fov, aspect, 0.1f, 1000.0f);
 
 bool is_updated = false;
 
 // Name of shader files
 const char* pVSFileName = "simpleVertexShader.txt";
 const char* pFSFileName = "simpleFragmentShader.txt";
+
+const char* sunVertexShader = "sunVertexShader.txt";
+const char* sunFragmentShader = "sunFragmentShader.txt";
+
 
 ModelData load_mesh(const char* file_name) {
 	ModelData modelData;
@@ -134,6 +160,60 @@ ModelData load_mesh(const char* file_name) {
 
 	aiReleaseImport(scene);
 	return modelData;
+}
+
+// load obj file
+bool loadOBJ(const char* path, std::vector<glm::vec3>& out_vertices) {
+	printf("Loading OBJ file %s...\n", path);
+	std::vector<unsigned int> vertexIndices;
+	std::vector<glm::vec3> temp_vertices;
+	FILE* file = fopen(path, "r");
+	if (file == NULL) {
+		printf("Impossible to open the file\n");
+		return false;
+	}
+	while (1) {
+		char lineHeader[128];
+		// read the first word of the line
+		int res = fscanf(file, "%s", lineHeader);
+		if (res == EOF)
+			break; // EOF = End Of File. Quit the loop.
+		// else : parse lineHeader
+		if (strcmp(lineHeader, "v") == 0) {
+			glm::vec3 vertex;
+			fscanf(file, "%f %f %f\n", &vertex.x, &vertex.y, &vertex.z);
+			temp_vertices.push_back(vertex);
+		}
+		else if (strcmp(lineHeader, "f") == 0) {
+			std::string vertex1, vertex2, vertex3;
+			unsigned int vertexIndex[3], normalIndex[3];
+			int matches = fscanf(file, "%d//%d %d//%d %d//%d\n", &vertexIndex[0], &normalIndex[0], &vertexIndex[1], &normalIndex[1], &vertexIndex[2], &normalIndex[2]);
+			if (matches != 6) {
+				printf("File can't be read by our simple parser :-( Try exporting with other options\n");
+				fclose(file);
+				return false;
+			}
+			vertexIndices.push_back(vertexIndex[0]);
+			vertexIndices.push_back(vertexIndex[1]);
+			vertexIndices.push_back(vertexIndex[2]);
+		}
+		else {
+			// Probably a comment, eat up the rest of the line
+			char stupidBuffer[1000];
+			fgets(stupidBuffer, 1000, file);
+		}
+	}
+	// For each vertex of each triangle
+	for (unsigned int i = 0; i < vertexIndices.size(); i++) {
+		// Get the indices of its attributes
+		unsigned int vertexIndex = vertexIndices[i];
+		// Get the attributes thanks to the index
+		glm::vec3 vertex = temp_vertices[vertexIndex - 1];
+		// Put the attributes in buffers
+		out_vertices.push_back(vertex);
+	}
+	fclose(file);
+	return true;
 }
 
 char* readShaderSource(const char* shaderFile) {
@@ -197,6 +277,9 @@ GLuint CompileShaders()
 	// Create two shader objects, one for the vertex, and one for the fragment shader
 	AddShader(shaderProgramID, pVSFileName, GL_VERTEX_SHADER);
 	AddShader(shaderProgramID, pFSFileName, GL_FRAGMENT_SHADER);
+
+	AddShader(sunShaderID, sunVertexShader, GL_VERTEX_SHADER);
+	AddShader(sunShaderID, sunFragmentShader, GL_FRAGMENT_SHADER);
 
 	GLint Success = 0;
 	GLchar ErrorLog[1024] = { '\0' };
@@ -264,6 +347,30 @@ void generateObjectBufferMesh() {
 
 	glEnableVertexAttribArray(loc4);
 	glVertexAttribPointer(loc4, 3, GL_FLOAT, GL_FALSE, 0, NULL);
+
+	//if (!loadOBJ(sun_path, sun_vertices)) throw "Error importing OBJ file for the sun";
+	//for (unsigned int i = 0; i < sun_vertices.size(); i++) {
+	//  sun_vertices.at(i) += sun_position;
+	//  sun_vertices.at(i) *= 3; //Scale
+	//}
+	//sunDistance = (GLuint)sunPosition.y;
+	//sunDistance = (GLuint)sunPosition.y;
+	//// Generate vertices for sun
+	//glGenVertexArrays(1, &sun_VertexArrayID);
+	//glBindVertexArray(sun_VertexArrayID);
+	//std::vector<GLfloat> result;
+	//for (unsigned int i = 0; i < sun_vertices.size(); i++) {
+	//  result.push_back(sun_vertices.at(i).x);
+	//  result.push_back(sun_vertices.at(i).y);
+	//  result.push_back(sun_vertices.at(i).z);
+	//}
+	//std::vector<GLfloat> g_sun_vertex_buffer_data = result;  
+	//sun_vertexbuffer_size = g_sun_vertex_buffer_data.size() / 3;
+	//glGenBuffers(1, &sun_vertexbuffer);
+	//glBindBuffer(GL_ARRAY_BUFFER, sun_vertexbuffer);
+	//glBufferData(GL_ARRAY_BUFFER, g_sun_vertex_buffer_data.size() * sizeof(GLfloat), &g_sun_vertex_buffer_data.front(), GL_STATIC_DRAW);
+	//// Get a handle for the sun's model transformation
+	//ModelSunID = glGetUniformLocation(sunShaderID, "sunPosition_modelspace");
 }
 
 void change_viewport(int w, int h) {
@@ -293,6 +400,16 @@ void RenderScreen() {
 	// Get a handle for our "LightPosition" uniform
 	GLuint LightID = glGetUniformLocation(shaderProgramID, "LightPosition_worldspace");
 
+	//Get a handle for the camera position
+	GLuint cameraPosID = glGetUniformLocation(shaderProgramID, "cameraPos");
+	// Get a handle for the center of the screen's center coordinates
+	GLuint scrID = glGetUniformLocation(shaderProgramID, "scr_center");
+	vec2 scr_center = vec2(width / 2, height / 2);
+	sunPosID = glGetUniformLocation(shaderProgramID, "lightPos");
+	GLfloat cameraPosition[] = { position.x, position.y, position.z };
+	glUniform3fv(cameraPosID, 1, &cameraPosition[0]);
+	glUniform2fv(scrID, 1, &scr_center.v[0]);
+
 
 	//Declare your uniform variables that will be used in your shader
 	int matrix_location = glGetUniformLocation(shaderProgramID, "model");
@@ -301,56 +418,56 @@ void RenderScreen() {
 	int MVP_location = glGetUniformLocation(shaderProgramID, "MVP");
 
 	// Compute the MVP matrix from keyboard and mouse input
-	mat4 View = ViewMatrix;
-	mat4 Projection = ProjectionMatrix;
-	mat4 Model = identity_mat4();
+	glm::mat4 View = ViewMatrix;
+	glm::mat4 Projection = ProjectionMatrix;
+	glm::mat4 Model;
 	//Model = rotate_z_deg(Model, rotate_y);
 	//View = translate(View, vec3(0.0, 0.0, -10.0f));
-	mat4 MVP = Projection * View * Model;
+	glm::mat4 MVP = Projection * View * Model;
 
-	Model = rotate_y_deg(View, 180.0f);
-	View = translate(View, vec3(0.0, 0.0, -20.0f));
+	Model = glm::rotate(View, 180.0f, glm::vec3(0, 1, 0));
+	View = glm::translate(View, glm::vec3(0.0, 0.0, -20.0f));
 
 	glPushMatrix();
 	// update uniforms & draw
-	glUniformMatrix4fv(proj_mat_location, 1, GL_FALSE, Projection.m);
-	glUniformMatrix4fv(view_mat_location, 1, GL_FALSE, View.m);
-	glUniformMatrix4fv(matrix_location, 1, GL_FALSE, Model.m);
-	glUniformMatrix4fv(MVP_location, 1, GL_FALSE, MVP.m);
+	glUniformMatrix4fv(proj_mat_location, 1, GL_FALSE, glm::value_ptr(Projection));
+	glUniformMatrix4fv(view_mat_location, 1, GL_FALSE, glm::value_ptr(View));
+	glUniformMatrix4fv(matrix_location, 1, GL_FALSE, glm::value_ptr(Model));
+	glUniformMatrix4fv(MVP_location, 1, GL_FALSE, glm::value_ptr(MVP));
 	glDrawArrays(GL_TRIANGLES, 0, mesh_data.mPointCount);
 	glPopMatrix();
 
 	glPushMatrix();
 	// set up the child matrix
-	mat4 modelchild_1 = identity_mat4();
-	modelchild_1 = rotate_z_deg(modelchild_1, 0.0f);
-	modelchild_1 = scale(modelchild_1, vec3(1/2.0f, 1/2.0f, 1/2.0f));
-	modelchild_1 = translate(modelchild_1, vec3(-30.0f, rotate_y, 20.0f));
+	glm::mat4 modelchild_1;
+	modelchild_1 = glm::rotate(modelchild_1, 0.0f, glm::vec3(0, 0, 1));
+	modelchild_1 = glm::scale(modelchild_1, glm::vec3(0.2f, 0.2f, 0.2f));
+	modelchild_1 = glm::translate(modelchild_1, glm::vec3(-30.0f, rotate_y, 20.0f));
 
 	// Apply the root matrix to the child matrix
 	modelchild_1 = Model * modelchild_1;
 
 	// Update the appropriate uniform and draw the mesh again
-	glUniformMatrix4fv(matrix_location, 1, GL_FALSE, modelchild_1.m);
+	glUniformMatrix4fv(matrix_location, 1, GL_FALSE, glm::value_ptr(modelchild_1));
 	glDrawArrays(GL_TRIANGLES, 0, mesh_data.mPointCount);
 	glPopMatrix();
 
 	
 	glPushMatrix();
 	// set up the second child matrix
-	mat4 modelchild_2 = identity_mat4();
-	modelchild_2 = scale(modelchild_2, vec3( 1.0f,  1.0f,  1.0f));
-	modelchild_2 = translate(modelchild_2, vec3(0.0f, 0.0f, 60.0f));
+	glm::mat4 modelchild_2;
+	modelchild_2 = glm::scale(modelchild_2, glm::vec3( 0.2f, 0.2f, 0.2f));
+	modelchild_2 = glm::translate(modelchild_2, glm::vec3(0.0f, 0.0f, 60.0f));
 
 	// Apply the root matrix to the child matrix
 	modelchild_2 = Model * modelchild_2;
 
 	// Update the appropriate uniform and draw the mesh again
-	glUniformMatrix4fv(matrix_location, 1, GL_FALSE, modelchild_2.m);
+	glUniformMatrix4fv(matrix_location, 1, GL_FALSE, glm::value_ptr(modelchild_2));
 	glDrawArrays(GL_TRIANGLES, 0, mesh_data.mPointCount);
 	glPopMatrix();
 
-	vec3 lightPos = vec3(4, 4, 4);
+	glm::vec3 lightPos = glm::vec3(4, 4, 4);
 	//glUniform3f(LightID, lightPos.x, lightPos.y, lightPos.z);
 
 	glutSwapBuffers();
@@ -401,44 +518,33 @@ void init() {
 }
 
 void pressKey(int key, int xx, int yy) {
-	float fraction = 0.01f;
+	float fraction = 0.5f;
 
 
 	switch (key) {
 	case GLUT_KEY_LEFT:
-		angle -= 0.01f;
-		lx = sin(angle);
-		lz = -cos(angle);
-		deltaAngle = -0.01f; 
+		position -= glm::normalize(glm::cross(direction, up)) * fraction;
 		break;
 
 	case GLUT_KEY_RIGHT:
-		angle += 0.01f;
-		lx = sin(angle);
-		lz = -cos(angle);
-		deltaAngle = 0.01f; 
+		position += glm::normalize(glm::cross(direction, up)) * fraction;
 		break;
 
 	case GLUT_KEY_UP:
-		x += lx * fraction;
-		z += z * fraction;
-		deltaMove = -0.5f;
+		// x += lx * fraction;
+		position += fraction * direction;
 		break;
 
 	case GLUT_KEY_DOWN:
-		x -= x * fraction;
-		z -= z * fraction;
-		deltaMove = 0.5f;
+		// x -= x * fraction;
+		position -= fraction * direction;
 		break;
 	}
+	
+	printf("position %f %f %f\n", position[0], position[1], position[2]);
+	ProjectionMatrix = glm::perspective(45.0f, aspect, 0.1f, 1000.0f);
 
-	vec3 position = vec3(x, 1.0f, z);
-	vec3 up = vec3(0.0f, -1.0f, 0.0f);
-	vec3 direction = vec3(x + lx, 1.0f, z + lz);
-
-	ProjectionMatrix = perspective(45.0f, aspect, 0.1f, 1000.0f);
-
-	ViewMatrix = look_at(
+	ViewMatrix = glm::lookAt(
 		position,           // Camera is here
 		position + direction, // and looks here : at the same position, plus "direction"
 		up                  // Head is up (set to 0,-1,0 to look upside-down)
@@ -464,7 +570,7 @@ void zoom_in() {
 	// zooming is set by the callback_mouse_button()
 	fov -= 10.0f;
 	if (fov < 5.0f) fov = 5.0f; // don't allow fov less than 5
-	ProjectionMatrix = perspective(fov, aspect, 1.0f, 1000.0f);
+	ProjectionMatrix = glm::perspective(fov, aspect, 1.0f, 1000.0f);
 }
 
 void zoom_out() {
@@ -472,7 +578,7 @@ void zoom_out() {
 	// zooming is set by the callback_mouse_button()
 	fov += 10.0f;
 	if (fov > 60.0f) fov = 60.0f; // don't allow fov less than 5
-	ProjectionMatrix = perspective(fov, aspect, 1.0f, 1000.0f);
+	ProjectionMatrix = glm::perspective(fov, aspect, 1.0f, 1000.0f);
 }
 
 // Compare the current mouse position with the old one to figure out which way to rotate the camera.
@@ -499,9 +605,9 @@ void look(int x, int y) {
 		deltaY /= 10.0f;
 	}
 
-	ViewMatrix = rotate_x_deg(identity_mat4(), (-deltaY) / (50 * 5));
-	ViewMatrix = rotate_y_deg(ViewMatrix, (-deltaX) / (20 * 5));
-	ViewMatrix = rotate_z_deg(ViewMatrix, (-deltaX) / (70 * 5));
+	ViewMatrix = glm::rotate(glm::mat4(), (-deltaY), glm::vec3(1, 0, 0));
+	ViewMatrix = glm::rotate(ViewMatrix, (-deltaX), glm::vec3(0, 1, 0));
+	ViewMatrix = glm::rotate(ViewMatrix, (-deltaX), glm::vec3(0, 0, 1));
 
 	/*else {
 		camera->rotateX(deltaY / 150.0f);
