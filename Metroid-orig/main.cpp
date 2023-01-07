@@ -71,6 +71,8 @@ int width = 0;
 int height = 0;
 float deltaAngle = 0.0f;
 float deltaMove = 0;
+float yaw = -90.0f;
+float pitch = 0.0f;
 // angle of rotation for the camera direction
 float angle = 0.0;
 // actual vector representing the camera's direction
@@ -425,50 +427,49 @@ void RenderScreen() {
 	//View = translate(View, vec3(0.0, 0.0, -10.0f));
 	glm::mat4 MVP = Projection * View * Model;
 
+
 	Model = glm::rotate(View, 180.0f, glm::vec3(0, 1, 0));
 	View = glm::translate(View, glm::vec3(0.0, 0.0, -20.0f));
 
 	glPushMatrix();
-	// update uniforms & draw
 	glUniformMatrix4fv(proj_mat_location, 1, GL_FALSE, glm::value_ptr(Projection));
 	glUniformMatrix4fv(view_mat_location, 1, GL_FALSE, glm::value_ptr(View));
-	glUniformMatrix4fv(matrix_location, 1, GL_FALSE, glm::value_ptr(Model));
 	glUniformMatrix4fv(MVP_location, 1, GL_FALSE, glm::value_ptr(MVP));
+
+	// Front spider
+	glm::mat4 front_spider;
+	front_spider = Model * front_spider;
+	glUniformMatrix4fv(matrix_location, 1, GL_FALSE, glm::value_ptr(front_spider));
 	glDrawArrays(GL_TRIANGLES, 0, mesh_data.mPointCount);
 	glPopMatrix();
 
+	//Up-down-spider - right
 	glPushMatrix();
-	// set up the child matrix
-	glm::mat4 modelchild_1;
-	modelchild_1 = glm::rotate(modelchild_1, 0.0f, glm::vec3(0, 0, 1));
-	modelchild_1 = glm::scale(modelchild_1, glm::vec3(0.2f, 0.2f, 0.2f));
-	modelchild_1 = glm::translate(modelchild_1, glm::vec3(-30.0f, rotate_y, 20.0f));
+	glm::mat4 right_spider;
+	right_spider = glm::rotate(right_spider, 0.0f, glm::vec3(0, 0, 1));
+	right_spider = glm::scale(right_spider, glm::vec3(0.2f, 0.2f, 0.2f));
+	right_spider = glm::translate(right_spider, glm::vec3(-30.0f, rotate_y, 20.0f));
 
-	// Apply the root matrix to the child matrix
-	modelchild_1 = Model * modelchild_1;
+	right_spider = Model * right_spider;
 
-	// Update the appropriate uniform and draw the mesh again
-	glUniformMatrix4fv(matrix_location, 1, GL_FALSE, glm::value_ptr(modelchild_1));
+	glUniformMatrix4fv(matrix_location, 1, GL_FALSE, glm::value_ptr(right_spider));
 	glDrawArrays(GL_TRIANGLES, 0, mesh_data.mPointCount);
 	glPopMatrix();
 
-	
+	//Back left side spider
 	glPushMatrix();
-	// set up the second child matrix
-	glm::mat4 modelchild_2;
-	modelchild_2 = glm::scale(modelchild_2, glm::vec3( 0.2f, 0.2f, 0.2f));
-	modelchild_2 = glm::translate(modelchild_2, glm::vec3(0.0f, 0.0f, 60.0f));
+	glm::mat4 back_spider;
+	back_spider = glm::scale(back_spider, glm::vec3(0.2f, 0.2f, 0.2f));
+	back_spider = glm::translate(back_spider, glm::vec3(50.0f, 0.0f, 60.0f));
 
-	// Apply the root matrix to the child matrix
-	modelchild_2 = Model * modelchild_2;
+	back_spider = Model * back_spider;
 
-	// Update the appropriate uniform and draw the mesh again
-	glUniformMatrix4fv(matrix_location, 1, GL_FALSE, glm::value_ptr(modelchild_2));
+	glUniformMatrix4fv(matrix_location, 1, GL_FALSE, glm::value_ptr(back_spider));
 	glDrawArrays(GL_TRIANGLES, 0, mesh_data.mPointCount);
 	glPopMatrix();
 
 	glm::vec3 lightPos = glm::vec3(4, 4, 4);
-	//glUniform3f(LightID, lightPos.x, lightPos.y, lightPos.z);
+	glUniform3f(LightID, lightPos.x, lightPos.y, lightPos.z);
 
 	glutSwapBuffers();
 }
@@ -541,7 +542,7 @@ void pressKey(int key, int xx, int yy) {
 		break;
 	}
 	
-	printf("position %f %f %f\n", position[0], position[1], position[2]);
+	
 	ProjectionMatrix = glm::perspective(45.0f, aspect, 0.1f, 1000.0f);
 
 	ViewMatrix = glm::lookAt(
@@ -584,39 +585,41 @@ void zoom_out() {
 // Compare the current mouse position with the old one to figure out which way to rotate the camera.
 // We call these "deltas" or "differences" in x and y
 void look(int x, int y) {
+	float sens = 0.1f;
 	if (is_first_time) {
-		if (zooming)
-			is_first_time = false;
+		is_first_time = false;
 		prev_mouse_X = GLfloat(x);
 		prev_mouse_Y = GLfloat(y);
 		return;
 	}
 
-	GLfloat deltaX = prev_mouse_X - x;
+	GLfloat deltaX = x - prev_mouse_X;
 	GLfloat deltaY = prev_mouse_Y - y;
 
-	if (deltaX < -6.0f) { deltaX = -1.0f; }
-	if (deltaX > 6.0f) { deltaX = 1.0f; }
-	if (deltaY < -6.0f) { deltaY = -1.0f; }
-	if (deltaY > 6.0f) { deltaY = 1.0f; }
+	prev_mouse_X = x;
+	prev_mouse_Y = y;
+
+	yaw += deltaX;
+	pitch += deltaY;
 
 	if (zooming) {
 		deltaX /= 10.0f;
 		deltaY /= 10.0f;
 	}
+	
+	glm::vec3 cam;
+	cam.x = cos(glm::radians(yaw)) * cos(glm::radians(pitch));
+	cam.y = sin(glm::radians(pitch));
+	cam.z = sin(glm::radians(yaw)) * cos(glm::radians(pitch));
+	direction = glm::normalize(cam);
 
-	ViewMatrix = glm::rotate(glm::mat4(), (-deltaY), glm::vec3(1, 0, 0));
-	ViewMatrix = glm::rotate(ViewMatrix, (-deltaX), glm::vec3(0, 1, 0));
-	ViewMatrix = glm::rotate(ViewMatrix, (-deltaX), glm::vec3(0, 0, 1));
+	printf("Delta %d %d %d\n", direction[0], direction[1], direction[2]);
+	ViewMatrix = glm::lookAt(
+		position,           
+		direction, 
+		up                  
+	);
 
-	/*else {
-		camera->rotateX(deltaY / 150.0f);
-		camera->rotateY(deltaX / 150.0f);
-	}*/
-
-	// 7) Update prev_mouse_X and prev_mouse_Y to be the current x and y
-	prev_mouse_X = x;
-	prev_mouse_Y = y;
 }
 
 int main(int argc, char** argv) {
@@ -652,7 +655,7 @@ int main(int argc, char** argv) {
 	// Mouse movements
 	glutMouseFunc(callback_mouse_button);
 	glutPassiveMotionFunc(look);
-	glutMotionFunc(look);
+	// glutMotionFunc(look);
 
 	//5. Set up objects and shaders
 	init();
