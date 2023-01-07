@@ -18,6 +18,7 @@
 
 // Include GLFW
 #include <GLFW/glfw3.h>
+//#include<glad/glad.h>
 
 // Assimp includes
 #include <assimp/cimport.h> 
@@ -31,7 +32,7 @@
 #define INTERVAL 15
 
 //  Sun coordinated
-const char* sun_path = "sun.obj";
+const char* sun_path = "sol.obj";
 std::vector<vec3> sun_vertices;
 vec3 sun_position = vec3(15.0, 15.0, 15.0);
 GLuint sunPosID;
@@ -61,6 +62,7 @@ GLuint normalbuffer;
 GLuint texturebuffer;
 GLuint loc1, loc2, loc3, loc4;
 GLfloat rotate_y = 0.0f;
+GLfloat crawl = -90.0f;
 
 ModelData mesh_data;
 ModelData dragon_data;
@@ -70,9 +72,16 @@ int width = 0;
 int height = 0;
 float deltaAngle = 0.0f;
 float deltaMove = 0;
-float yaw = -90.0f;
-float pitch = 0.0f;
-
+float hori = -90.0f;
+float verti = 0.0f;
+bool r_loop = true;
+bool c_loop = true;
+// angle of rotation for the camera direction
+float angle = 0.0;
+// actual vector representing the camera's direction
+float lx = 0.0f, lz = -1.0f;
+// XZ position of the camera
+float x = 0.0f, z = 5.0f;
 glm::vec3 position = glm::vec3(0.0f, 0.5f, 3.0f);
 glm::vec3 direction = glm::vec3(0.0f, 0.0f, -1.0f);
 glm::vec3 up = glm::vec3(0.0f, 1.0f, 0.0f);
@@ -86,11 +95,20 @@ GLfloat prev_mouse_Y;
 bool is_first_time = true;
 vec2 m_mousePos;
 
-float fspeed = 3.0f;
+// position
+glm::vec3 fposition = glm::vec3(0, 0, 5);
+// horizontal angle : toward -Z
+float fhorizontalAngle = 3.14f;
+// vertical angle : 0, look at the horizon
+float fverticalAngle = 0.0f;
+// Initial Field of View
+float finitialFoV = 45.0f;
+
+float fspeed = 3.0f; // 3 units / second
 float fmouseSpeed = 0.005f;
 
 glm::mat4 ViewMatrix = glm::mat4();
-glm::mat4 ProjectionMatrix = glm::perspective(fov, aspect, 0.1f, 1000.0f);
+glm::mat4 ProjectionMatrix = glm::perspective(180.0f, aspect, 0.1f, 1000.0f);
 
 bool is_updated = false;
 
@@ -100,6 +118,7 @@ const char* pFSFileName = "simpleFragmentShader.txt";
 
 const char* sunVertexShader = "sunVertexShader.txt";
 const char* sunFragmentShader = "sunFragmentShader.txt";
+
 
 ModelData load_mesh(const char* file_name) {
 	ModelData modelData;
@@ -135,7 +154,12 @@ ModelData load_mesh(const char* file_name) {
 				const aiVector3D* vt = &(mesh->mTextureCoords[0][v_i]);
 				modelData.mTextureCoords.push_back(vec2(vt->x, vt->y));
 			}
-			if (mesh->HasTangentsAndBitangents()) { }
+			if (mesh->HasTangentsAndBitangents()) {
+				/* You can extract tangents and bitangents here              */
+				/* Note that you might need to make Assimp generate this     */
+				/* data for you. Take a look at the flags that aiImportFile  */
+				/* can take.                                                 */
+			}
 		}
 	}
 
@@ -155,9 +179,11 @@ bool loadOBJ(const char* path, std::vector<glm::vec3>& out_vertices) {
 	}
 	while (1) {
 		char lineHeader[128];
+		// read the first word of the line
 		int res = fscanf(file, "%s", lineHeader);
 		if (res == EOF)
-			break;
+			break; // EOF = End Of File. Quit the loop.
+		// else : parse lineHeader
 		if (strcmp(lineHeader, "v") == 0) {
 			glm::vec3 vertex;
 			fscanf(file, "%f %f %f\n", &vertex.x, &vertex.y, &vertex.z);
@@ -177,13 +203,18 @@ bool loadOBJ(const char* path, std::vector<glm::vec3>& out_vertices) {
 			vertexIndices.push_back(vertexIndex[2]);
 		}
 		else {
-			char tempBuffer[1000];
-			fgets(tempBuffer, 1000, file);
+			// Probably a comment, eat up the rest of the line
+			char stupidBuffer[1000];
+			fgets(stupidBuffer, 1000, file);
 		}
 	}
+	// For each vertex of each triangle
 	for (unsigned int i = 0; i < vertexIndices.size(); i++) {
+		// Get the indices of its attributes
 		unsigned int vertexIndex = vertexIndices[i];
+		// Get the attributes thanks to the index
 		glm::vec3 vertex = temp_vertices[vertexIndex - 1];
+		// Put the attributes in buffers
 		out_vertices.push_back(vertex);
 	}
 	fclose(file);
@@ -221,6 +252,7 @@ static void AddShader(GLuint ShaderProgram, const char* pShaderText, GLenum Shad
 
 	const char* pShaderSource = readShaderSource(pShaderText);
 
+	// To load shader text onto shader handle
 	glShaderSource(ShaderObj, 1, (const GLchar**)&pShaderSource, NULL);
 	glCompileShader(ShaderObj);
 
@@ -233,17 +265,21 @@ static void AddShader(GLuint ShaderProgram, const char* pShaderText, GLenum Shad
 		fprintf(stderr, "Error compiling shader type %d: '%s'\n", ShaderType, InfoLog);
 		exit(1);
 	}
+	// Attach the compiled shader object to the program object
 	glAttachShader(ShaderProgram, ShaderObj);
 }
 
 GLuint CompileShaders()
 {
+	// Allocate handle for our program
 	shaderProgramID = glCreateProgram();
+	// Check for non-zero handle as system may sometimes run out of resources
 	if (shaderProgramID == 0) {
 		fprintf(stderr, "Error creating shader program\n");
 		exit(1);
 	}
 
+	// Create two shader objects, one for the vertex, and one for the fragment shader
 	AddShader(shaderProgramID, pVSFileName, GL_VERTEX_SHADER);
 	AddShader(shaderProgramID, pFSFileName, GL_FRAGMENT_SHADER);
 
@@ -252,7 +288,9 @@ GLuint CompileShaders()
 
 	GLint Success = 0;
 	GLchar ErrorLog[1024] = { '\0' };
+	// After compiling all shader objects and attaching them to the program, we can finally link it
 	glLinkProgram(shaderProgramID);
+	// check for program related errors using glGetProgramiv
 	glGetProgramiv(shaderProgramID, GL_LINK_STATUS, &Success);
 	if (Success == 0) {
 		glGetProgramInfoLog(shaderProgramID, sizeof(ErrorLog), NULL, ErrorLog);
@@ -260,13 +298,16 @@ GLuint CompileShaders()
 		exit(1);
 	}
 
+	// program has been successfully linked but needs to be validated to check whether the program can execute given the current pipeline state
 	glValidateProgram(shaderProgramID);
+	// check for program related errors using glGetProgramiv
 	glGetProgramiv(shaderProgramID, GL_VALIDATE_STATUS, &Success);
 	if (!Success) {
 		glGetProgramInfoLog(shaderProgramID, sizeof(ErrorLog), NULL, ErrorLog);
 		fprintf(stderr, "Invalid shader program: '%s'\n", ErrorLog);
 		exit(1);
 	}
+	// Finally, use the linked shader program
 	glUseProgram(shaderProgramID);
 	return shaderProgramID;
 }
@@ -283,6 +324,7 @@ void generateObjectBufferMesh() {
 	glGenBuffers(1, &vertexbuffer);
 	glBindBuffer(GL_ARRAY_BUFFER, vertexbuffer);
 	glBufferData(GL_ARRAY_BUFFER, mesh_data.mPointCount * sizeof(vec3), &mesh_data.mVertices[0], GL_STATIC_DRAW);
+
 
 	glGenBuffers(1, &normalbuffer);
 	glBindBuffer(GL_ARRAY_BUFFER, normalbuffer);
@@ -306,6 +348,7 @@ void generateObjectBufferMesh() {
 	//	glEnableVertexAttribArray (loc3);
 	//	glBindBuffer (GL_ARRAY_BUFFER, texturebuffer);
 	//	glVertexAttribPointer (loc3, 2, GL_FLOAT, GL_FALSE, 0, NULL);
+
 
 	glEnableVertexAttribArray(loc4);
 	glVertexAttribPointer(loc4, 3, GL_FLOAT, GL_FALSE, 0, NULL);
@@ -346,11 +389,12 @@ void change_viewport(int w, int h) {
 void RenderScreen() {
 
 	// Dark background
-	glClearColor(0.0f, 0.0f, 0.4f, 1.0f);
+	glClearColor(0.f, 0.0f, 0.4f, 1.0f);
 
-	glEnable(GL_DEPTH_TEST);
+	// tell GL to only draw onto a pixel if the shape is closer to the viewer
+	glEnable(GL_DEPTH_TEST); // enable depth-testing
 	glEnable(GL_CULL_FACE);
-	glDepthFunc(GL_LESS);
+	glDepthFunc(GL_LESS); // depth-testing interprets a smaller value as "closer"
 	glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
 	glPolygonMode(GL_FRONT_AND_BACK, GL_FILL);
 	glUseProgram(shaderProgramID);
@@ -367,20 +411,25 @@ void RenderScreen() {
 	GLuint scrID = glGetUniformLocation(shaderProgramID, "scr_center");
 	vec2 scr_center = vec2(width / 2, height / 2);
 	sunPosID = glGetUniformLocation(shaderProgramID, "lightPos");
-
 	GLfloat cameraPosition[] = { position.x, position.y, position.z };
 	glUniform3fv(cameraPosID, 1, &cameraPosition[0]);
 	glUniform2fv(scrID, 1, &scr_center.v[0]);
 
+
+	//Declare your uniform variables that will be used in your shader
 	int matrix_location = glGetUniformLocation(shaderProgramID, "model");
 	int view_mat_location = glGetUniformLocation(shaderProgramID, "view");
 	int proj_mat_location = glGetUniformLocation(shaderProgramID, "projection");
 	int MVP_location = glGetUniformLocation(shaderProgramID, "MVP");
 
+	// Compute the MVP matrix from keyboard and mouse input
 	glm::mat4 View = ViewMatrix;
 	glm::mat4 Projection = ProjectionMatrix;
 	glm::mat4 Model;
+	//Model = rotate_z_deg(Model, rotate_y);
+	//View = translate(View, vec3(0.0, 0.0, -10.0f));
 	glm::mat4 MVP = Projection * View * Model;
+
 
 	Model = glm::rotate(View, 180.0f, glm::vec3(0, 1, 0));
 	View = glm::translate(View, glm::vec3(0.0, 0.0, -20.0f));
@@ -422,6 +471,19 @@ void RenderScreen() {
 	glDrawArrays(GL_TRIANGLES, 0, mesh_data.mPointCount);
 	glPopMatrix();
 
+	//Left side spider
+	glPushMatrix();
+	glm::mat4 left_spider;
+	left_spider = glm::rotate(left_spider, 180.0f, glm::vec3(0, 0, 1));
+	left_spider = glm::scale(left_spider, glm::vec3(0.2f, 0.2f, 0.2f));
+	left_spider = glm::translate(left_spider, glm::vec3(crawl, -20.0f, 0.0f));
+
+	left_spider = Model * left_spider;
+
+	glUniformMatrix4fv(matrix_location, 1, GL_FALSE, glm::value_ptr(left_spider));
+	glDrawArrays(GL_TRIANGLES, 0, mesh_data.mPointCount);
+	glPopMatrix();
+
 	glm::vec3 lightPos = glm::vec3(4, 4, 4);
 	glUniform3f(LightID, lightPos.x, lightPos.y, lightPos.z);
 
@@ -438,16 +500,38 @@ void updateScene() {
 	last_time = curr_time;
 
 	// Rotate the model slowly up and down around the y axis
-	if (rotate_y >= 0) {
+	if (rotate_y == 20.0f or not r_loop) {
+		if (rotate_y <= 0) r_loop = true;
+		rotate_y -= 8.0f * delta;
+		rotate_y = fmodf(rotate_y, 360.0f);
+		//printf("decreasing\n");
+		//printf("%f\n", rotate_y);
+	}
+	if ((rotate_y == 0) or r_loop) {
+		if (rotate_y >= 20) r_loop = false;
 		rotate_y += 8.0f * delta;
 		rotate_y = fmodf(rotate_y, 360.0f);
+		//printf("%f\n", rotate_y);
 
-		//Reset if it reaches the end of window
-		if (rotate_y >= 20.0f) {
-			rotate_y = 0.0f;
-		}
+	}
+	if ((crawl == -90.0f) or not c_loop) {
+		if (crawl >= -70.0f) c_loop = true;
+		crawl -= 8.0f * delta;
+		crawl = fmodf(crawl, 360.0f);
+		//printf("%f\n", rotate_y);
+
 	}
 
+	if (crawl == -70.0f or c_loop) {
+		if (crawl <= -90.0f) c_loop = false;
+		crawl += 8.0f * delta;
+		crawl = fmodf(crawl, 360.0f);
+		//printf("decreasing\n");
+		//printf("%f\n", rotate_y);
+	}
+
+
+	// Draw the next frame
 	glutPostRedisplay();
 }
 
@@ -471,6 +555,7 @@ void init() {
 void pressKey(int key, int xx, int yy) {
 	float fraction = 0.5f;
 
+
 	switch (key) {
 	case GLUT_KEY_LEFT:
 		position -= glm::normalize(glm::cross(direction, up)) * fraction;
@@ -481,21 +566,26 @@ void pressKey(int key, int xx, int yy) {
 		break;
 
 	case GLUT_KEY_UP:
+		// x += lx * fraction;
 		position += fraction * direction;
 		break;
 
 	case GLUT_KEY_DOWN:
+		// x -= x * fraction;
 		position -= fraction * direction;
 		break;
+
+	case GLUT_KEY_CTRL_L:
+		glutSetCursor(GLUT_CURSOR_LEFT_ARROW);
 	}
 
 
-	ProjectionMatrix = glm::perspective(45.0f, aspect, 0.1f, 1000.0f);
+	ProjectionMatrix = glm::perspective(180.0f, aspect, 0.1f, 1000.0f);
 
 	ViewMatrix = glm::lookAt(
 		position,           // Camera is here
 		position + direction, // and looks here : at the same position, plus "direction"
-		up                  // Head is up
+		up                  // Head is up (set to 0,-1,0 to look upside-down)
 	);
 	glutPostRedisplay();
 }
@@ -504,6 +594,7 @@ void callback_mouse_button(int button, int state, int x, int y) {
 	printf("%d, %d\n", button, state);
 
 	if (button == GLUT_LEFT_BUTTON) {
+		glutSetCursor(GLUT_CURSOR_NONE);
 		if (state == 0) {
 			zooming = true;
 		}
@@ -514,19 +605,25 @@ void callback_mouse_button(int button, int state, int x, int y) {
 }
 
 void zoom_in() {
+	// FOV == field of view of the camera
+	// zooming is set by the callback_mouse_button()
 	fov -= 10.0f;
-	if (fov < 5.0f) fov = 5.0f;
+	if (fov < 5.0f) fov = 5.0f; // don't allow fov less than 5
 	ProjectionMatrix = glm::perspective(fov, aspect, 1.0f, 1000.0f);
 }
 
 void zoom_out() {
+	// FOV == field of view of the camera
+	// zooming is set by the callback_mouse_button()
 	fov += 10.0f;
-	if (fov > 60.0f) fov = 60.0f;
+	if (fov > 60.0f) fov = 60.0f; // don't allow fov less than 5
 	ProjectionMatrix = glm::perspective(fov, aspect, 1.0f, 1000.0f);
 }
 
+// Compare the current mouse position with the old one to figure out which way to rotate the camera.
+// We call these "deltas" or "differences" in x and y
 void look(int x, int y) {
-	float sens = 0.1f;
+	float sens = 0.01f;
 	if (is_first_time) {
 		is_first_time = false;
 		prev_mouse_X = GLfloat(x);
@@ -540,8 +637,8 @@ void look(int x, int y) {
 	prev_mouse_X = x;
 	prev_mouse_Y = y;
 
-	yaw += deltaX;
-	pitch += deltaY;
+	hori += deltaX;
+	verti += deltaY;
 
 	if (zooming) {
 		deltaX /= 10.0f;
@@ -549,12 +646,11 @@ void look(int x, int y) {
 	}
 
 	glm::vec3 cam;
-	cam.x = cos(glm::radians(yaw)) * cos(glm::radians(pitch));
-	cam.y = sin(glm::radians(pitch));
-	cam.z = sin(glm::radians(yaw)) * cos(glm::radians(pitch));
+	cam.x = cos(glm::radians(hori)) * cos(glm::radians(verti));
+	cam.y = sin(glm::radians(verti));
+	cam.z = sin(glm::radians(hori)) * cos(glm::radians(verti));
 	direction = glm::normalize(cam);
 
-	printf("Delta %f %f %f\n", direction[0], direction[1], direction[2]);
 	ViewMatrix = glm::lookAt(
 		position,
 		direction,
@@ -590,18 +686,21 @@ int main(int argc, char** argv) {
 	glutDisplayFunc(RenderScreen);
 	glutIdleFunc(updateScene);
 
-	//5. Keyboard movements
+	// Keyboard movements
 	glutSpecialFunc(pressKey);
 
-	//6. Mouse movements
+	// Mouse movements
 	glutMouseFunc(callback_mouse_button);
 	glutPassiveMotionFunc(look);
-	// glutMotionFunc(look);
+	glutMotionFunc(look);
 
-	//7. Set up objects and shaders
+	glutSetCursor(GLUT_CURSOR_NONE);
+	glutWarpPointer(100, 100);
+
+	//5. Set up objects and shaders
 	init();
 
-	//8. Begin infinite event loop
+	//6. Begin infinite event loop
 	glutMainLoop();
 
 	return 0;
