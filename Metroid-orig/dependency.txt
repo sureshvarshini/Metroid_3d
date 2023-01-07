@@ -1,0 +1,2 @@
+Linker input lib dependencies
+opengl32.lib;glew32.lib;glfw3.lib;freeglut.lib;assimp.lib;%(AdditionalDependencies)
