@@ -11,68 +11,62 @@ uniform vec3 cameraPos;
 uniform vec3 lightPos;
 uniform vec2 scr_center;
 
-// Ouput data
+// Output data
 out vec3 color;
 
 void main(){
-	//VARIABLES FOR THE FLASHLIGHT
+	//flashlight
 	float intensity = 0;				
-	float radius = 40;
-	float outerRadius = radius + 40;
-	float addedIntensity = 1.0;
-	float distance = length(cameraPos - fragmentPosition);	//Using a quadratic function to calculate light attenuation
+	float innerRadius = 40;
+	float outerRadius = innerRadius + 40;
+	float additionalIntensity = 1.0;
+	float distance = length(cameraPos - fragmentPosition);
 	float constant = 1.0;
 	float linear = 0.09;
-	float quad = 0.032;
+	float quadratic = 0.032;
 	float pointX = gl_FragCoord.x - scr_center.x;
 	float pointY = gl_FragCoord.y - scr_center.y;
-	float result =pow(pointX, 2) + pow(pointY, 2) - pow(radius, 2);  //Formula for circle
+	float result = pow(pointX, 2) + pow(pointY, 2) - pow(innerRadius, 2);
 	vec3 lightPosition = lightPos;
 
 	vec3 lightColor = normalize(vec3(255.0, 230.0, 180.0));
 
-	//Calculations on light position relative to the fragment's position
+	//Normal
 	vec3 norm = normalize(surfaceNormals);
 	vec3 lightDirection = normalize(lightPosition - fragmentPosition);
 
-	//Calculating on the viewer's position to the fragment's position for specular lighting
+	//Iintensity of diffuse lighting to the fragment
+	float diffuseFactor = max(dot(norm, lightDirection), 0.0);
+	vec3 diffuseLighting = diffuseFactor * lightColor;
+
+	//Specular lighting
 	vec3 viewDirection = normalize(cameraPos - fragmentPosition);
 	vec3 reflectDirection = reflect(-lightDirection, norm);
 
-	//Calculating the intensity of the spectular lighting
+	//Intensity of the spectular lighting
 	float specularIntensity = 0.5;
 	float specularFactor = pow(max(dot(viewDirection, reflectDirection), 0.0), 64);
 	vec3 specularLighting = specularIntensity * specularFactor * lightColor;
 
-	//Calculating the intensity of diffuse lighting to the fragment
-	float diffuseFactor = max(dot(norm, lightDirection), 0.0);
-	vec3 diffuseLighting = diffuseFactor * lightColor;
-
 	//Ambient lighting 
 	float ambientIntensity = 0.3;
 
-	//Apply ambient intensity to the color of surface
+	//Apply intensity
 	vec3 ambient = ambientIntensity * lightColor;
 
-	//Points that result lower than 0, are within the circle
 	if (result < 0) {
-		// Let's apply light fading away from distant objects
-		float attenuation = 1 / (constant + (linear * distance) + (quad * pow(distance, 2)));
-
-		intensity = addedIntensity*attenuation;
+		float attenuation = 1 / (constant + (linear * distance) + (quadratic * pow(distance, 2)));
+		intensity = additionalIntensity*attenuation;
 	} else {
-		// Let's draw the light fading way from the center of the light
-		if (result + (radius*radius) - (outerRadius*outerRadius) < 0) {
+		
+		if (result + (innerRadius * innerRadius) - (outerRadius * outerRadius) < 0) {
 			float radDis = sqrt((pointX*pointX) + (pointY*pointY));
-			float normVal = (outerRadius - radDis) / (outerRadius - radius);
+			float normVal = (outerRadius - radDis) / (outerRadius - innerRadius);
 			
-			// Let's apply light fading away from distant objects
-			float attenuation = 1 / (constant + (linear * distance) + (quad * pow(distance, 2)));
-
-			intensity = addedIntensity*attenuation*normVal;
+			float attenuation = 1 / (constant + (linear * distance) + (quadratic * pow(distance, 2)));
+			intensity = additionalIntensity*attenuation*normVal;
 		}	
 	}
 
-	//gl_FragColor = vec4 (LightIntensity, 1.0);
 	color = LightIntensity + ambient + diffuseLighting + intensity;
 }
